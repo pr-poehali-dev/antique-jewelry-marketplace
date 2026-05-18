@@ -6,7 +6,7 @@ from psycopg2.extras import RealDictCursor
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Password',
 }
 
@@ -32,15 +32,14 @@ def handler(event: dict, context) -> dict:
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}
 
     method = event.get('httpMethod', 'GET')
-    path = event.get('path', '/')
     headers = event.get('headers') or {}
     body = json.loads(event.get('body') or '{}')
 
-    # GET /  — список всех товаров (публичный)
+    # GET — список всех товаров (публичный), сортировка по sort_order
     if method == 'GET':
         conn = get_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute('SELECT * FROM products ORDER BY id')
+        cur.execute('SELECT * FROM products ORDER BY sort_order, id')
         products = [dict(r) for r in cur.fetchall()]
         cur.close()
         conn.close()
@@ -50,13 +49,15 @@ def handler(event: dict, context) -> dict:
     if not check_admin(headers):
         return json_response({'error': 'Неверный пароль'}, 403)
 
-    # POST / — создать товар
+    # POST — создать товар
     if method == 'POST':
         conn = get_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM products')
+        next_order = cur.fetchone()['coalesce']
         cur.execute(
-            'INSERT INTO products (name, price, image, category, era, description) VALUES (%s, %s, %s, %s, %s, %s) RETURNING *',
-            (body['name'], body['price'], body.get('image', ''), body.get('category', ''), body.get('era', ''), body.get('description', ''))
+            'INSERT INTO products (name, price, image, category, era, description, sort_order) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *',
+            (body['name'], body['price'], body.get('image', ''), body.get('category', ''), body.get('era', ''), body.get('description', ''), next_order)
         )
         product = dict(cur.fetchone())
         conn.commit()
@@ -64,7 +65,7 @@ def handler(event: dict, context) -> dict:
         conn.close()
         return json_response(product, 201)
 
-    # PUT / — обновить товар
+    # PUT — обновить товар
     if method == 'PUT':
         product_id = body.get('id')
         conn = get_conn()
@@ -81,7 +82,19 @@ def handler(event: dict, context) -> dict:
             return json_response({'error': 'Товар не найден'}, 404)
         return json_response(dict(product))
 
-    # DELETE / — удалить товар
+    # PATCH — обновить порядок (принимает список [{id, sort_order}])
+    if method == 'PATCH':
+        order_list = body.get('order', [])
+        conn = get_conn()
+        cur = conn.cursor()
+        for item in order_list:
+            cur.execute('UPDATE products SET sort_order=%s WHERE id=%s', (item['sort_order'], item['id']))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return json_response({'success': True})
+
+    # DELETE — удалить товар
     if method == 'DELETE':
         product_id = body.get('id')
         conn = get_conn()

@@ -12,6 +12,7 @@ type Product = {
   category: string;
   era: string;
   description: string;
+  sort_order: number;
 };
 
 const EMPTY_FORM = {
@@ -36,6 +37,9 @@ export default function Admin() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [reordering, setReordering] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const adminHeaders = {
@@ -149,6 +153,37 @@ export default function Admin() {
 
   const closeForm = () => { setShowForm(false); setForm(EMPTY_FORM); setEditingId(null); };
 
+  // Drag & drop для сортировки товаров
+  const handleSortDragStart = (id: number) => setDraggedId(id);
+  const handleSortDragOver = (e: React.DragEvent, id: number) => {
+    e.preventDefault();
+    if (id !== draggedId) setDragOverId(id);
+  };
+  const handleSortDrop = async (e: React.DragEvent, targetId: number) => {
+    e.preventDefault();
+    if (!draggedId || draggedId === targetId) { setDraggedId(null); setDragOverId(null); return; }
+
+    const oldList = [...products];
+    const dragIdx = oldList.findIndex((p) => p.id === draggedId);
+    const targetIdx = oldList.findIndex((p) => p.id === targetId);
+    const newList = [...oldList];
+    const [moved] = newList.splice(dragIdx, 1);
+    newList.splice(targetIdx, 0, moved);
+    const withOrder = newList.map((p, i) => ({ ...p, sort_order: i + 1 }));
+    setProducts(withOrder);
+    setDraggedId(null);
+    setDragOverId(null);
+
+    setReordering(true);
+    await fetch(API_URL, {
+      method: "PATCH",
+      headers: adminHeaders,
+      body: JSON.stringify({ order: withOrder.map((p) => ({ id: p.id, sort_order: p.sort_order })) }),
+    });
+    setReordering(false);
+  };
+  const handleSortDragEnd = () => { setDraggedId(null); setDragOverId(null); };
+
   const inputCls = "w-full bg-dark-elevated border border-border px-4 py-3 font-montserrat text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-gold/60 transition-colors";
   const labelCls = "font-montserrat text-[9px] tracking-[0.3em] uppercase text-gold/60 block mb-2";
 
@@ -195,13 +230,21 @@ export default function Admin() {
             <h1 className="font-cormorant text-xl text-foreground font-light">Товары каталога</h1>
           </div>
         </div>
-        <button
-          onClick={handleNew}
-          className="gold-gradient text-dark-base font-montserrat text-[10px] tracking-[0.2em] uppercase px-5 py-2.5 hover:opacity-90 transition-all duration-300 flex items-center gap-2"
-        >
-          <Icon name="Plus" size={14} />
-          Добавить товар
-        </button>
+        <div className="flex items-center gap-3">
+          {reordering && (
+            <div className="flex items-center gap-2 text-gold/60">
+              <Icon name="Loader2" size={14} className="animate-spin" />
+              <span className="font-montserrat text-[10px]">Сохраняю порядок...</span>
+            </div>
+          )}
+          <button
+            onClick={handleNew}
+            className="gold-gradient text-dark-base font-montserrat text-[10px] tracking-[0.2em] uppercase px-5 py-2.5 hover:opacity-90 transition-all duration-300 flex items-center gap-2"
+          >
+            <Icon name="Plus" size={14} />
+            Добавить товар
+          </button>
+        </div>
       </div>
 
       <div className="max-w-5xl mx-auto p-6">
@@ -241,7 +284,6 @@ export default function Admin() {
               <div className="mb-5">
                 <label className={labelCls}>Фотография товара</label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Drop zone */}
                   <div
                     onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                     onDragLeave={() => setDragOver(false)}
@@ -265,17 +307,11 @@ export default function Admin() {
                       </>
                     )}
                   </div>
-
-                  {/* Preview */}
                   <div className="border border-border bg-dark-elevated flex items-center justify-center min-h-[120px] overflow-hidden">
                     {form.image ? (
                       <div className="relative w-full h-full min-h-[120px]">
                         <img src={form.image} alt="Превью" className="w-full h-full object-cover" style={{ minHeight: 120 }} />
-                        <button
-                          type="button"
-                          onClick={() => setForm({ ...form, image: "" })}
-                          className="absolute top-2 right-2 w-6 h-6 bg-dark-base/80 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors"
-                        >
+                        <button type="button" onClick={() => setForm({ ...form, image: "" })} className="absolute top-2 right-2 w-6 h-6 bg-dark-base/80 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors">
                           <Icon name="X" size={12} />
                         </button>
                       </div>
@@ -287,15 +323,8 @@ export default function Admin() {
                     )}
                   </div>
                 </div>
-
-                {/* URL fallback */}
                 <div className="mt-3">
-                  <input
-                    value={form.image}
-                    onChange={(e) => setForm({ ...form, image: e.target.value })}
-                    className={inputCls}
-                    placeholder="Или вставьте ссылку на фото: https://..."
-                  />
+                  <input value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} className={inputCls} placeholder="Или вставьте ссылку на фото: https://..." />
                 </div>
               </div>
 
@@ -315,7 +344,7 @@ export default function Admin() {
           </div>
         )}
 
-        {/* Products table */}
+        {/* Products list */}
         {loading ? (
           <div className="text-center py-20">
             <Icon name="Loader2" size={32} className="animate-spin text-gold mx-auto" />
@@ -326,37 +355,63 @@ export default function Admin() {
             <p className="font-montserrat text-xs text-muted-foreground">Нажмите «Добавить товар» чтобы начать</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {products.map((p) => (
-              <div key={p.id} className="bg-dark-surface border border-border flex items-center gap-4 p-4 hover:border-gold/30 transition-all duration-300">
-                {p.image ? (
-                  <img src={p.image} alt={p.name} className="w-16 h-16 object-cover flex-shrink-0" />
-                ) : (
-                  <div className="w-16 h-16 bg-dark-elevated flex items-center justify-center flex-shrink-0">
-                    <Icon name="Image" size={20} className="text-muted-foreground" />
+          <>
+            <p className="font-montserrat text-[10px] text-muted-foreground mb-3 flex items-center gap-1.5">
+              <Icon name="GripVertical" size={12} />
+              Перетащите товары для изменения порядка в каталоге
+            </p>
+            <div className="space-y-2">
+              {products.map((p) => (
+                <div
+                  key={p.id}
+                  draggable
+                  onDragStart={() => handleSortDragStart(p.id)}
+                  onDragOver={(e) => handleSortDragOver(e, p.id)}
+                  onDrop={(e) => handleSortDrop(e, p.id)}
+                  onDragEnd={handleSortDragEnd}
+                  className={`bg-dark-surface border flex items-center gap-4 p-4 transition-all duration-200 cursor-grab active:cursor-grabbing select-none ${
+                    draggedId === p.id ? "opacity-40 border-gold/30" :
+                    dragOverId === p.id ? "border-gold bg-gold/5" :
+                    "border-border hover:border-gold/30"
+                  }`}
+                >
+                  {/* Drag handle */}
+                  <div className="text-muted-foreground/40 hover:text-gold/60 transition-colors flex-shrink-0">
+                    <Icon name="GripVertical" size={18} />
                   </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-cormorant text-lg text-foreground font-light truncate">{p.name}</p>
-                  <div className="flex items-center gap-3 mt-1">
-                    {p.category && <span className="font-montserrat text-[9px] tracking-[0.2em] uppercase text-gold/60">{p.category}</span>}
-                    {p.era && <span className="font-montserrat text-[9px] text-muted-foreground">{p.era}</span>}
+
+                  {p.image ? (
+                    <img src={p.image} alt={p.name} className="w-14 h-14 object-cover flex-shrink-0" />
+                  ) : (
+                    <div className="w-14 h-14 bg-dark-elevated flex items-center justify-center flex-shrink-0">
+                      <Icon name="Image" size={18} className="text-muted-foreground" />
+                    </div>
+                  )}
+
+                  <div className="flex-1 min-w-0">
+                    <p className="font-cormorant text-lg text-foreground font-light truncate">{p.name}</p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      {p.category && <span className="font-montserrat text-[9px] tracking-[0.2em] uppercase text-gold/60">{p.category}</span>}
+                      {p.era && <span className="font-montserrat text-[9px] text-muted-foreground">{p.era}</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex-shrink-0 text-right mr-2">
+                    <p className="font-cormorant text-xl text-gold font-light">{p.price.toLocaleString("ru-RU")} ₽</p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={() => handleEdit(p)} className="w-9 h-9 border border-border flex items-center justify-center text-muted-foreground hover:text-gold hover:border-gold/40 transition-all duration-300">
+                      <Icon name="Pencil" size={14} />
+                    </button>
+                    <button onClick={() => handleDelete(p.id)} disabled={deletingId === p.id} className="w-9 h-9 border border-border flex items-center justify-center text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all duration-300 disabled:opacity-40">
+                      {deletingId === p.id ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Trash2" size={14} />}
+                    </button>
                   </div>
                 </div>
-                <div className="flex-shrink-0 text-right mr-4">
-                  <p className="font-cormorant text-xl text-gold font-light">{p.price.toLocaleString("ru-RU")} ₽</p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button onClick={() => handleEdit(p)} className="w-9 h-9 border border-border flex items-center justify-center text-muted-foreground hover:text-gold hover:border-gold/40 transition-all duration-300">
-                    <Icon name="Pencil" size={14} />
-                  </button>
-                  <button onClick={() => handleDelete(p.id)} disabled={deletingId === p.id} className="w-9 h-9 border border-border flex items-center justify-center text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all duration-300 disabled:opacity-40">
-                    {deletingId === p.id ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Trash2" size={14} />}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
