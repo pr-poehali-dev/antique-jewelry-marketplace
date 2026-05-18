@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import Icon from "@/components/ui/icon";
 
 const API_URL = "https://functions.poehali.dev/a7d65e38-ef61-4f2a-93fc-0ae9439533a8";
@@ -10,6 +10,8 @@ type Product = {
   name: string;
   price: number;
   image: string;
+  images: string[];
+  video_url: string;
   category: string;
   era: string;
   description: string;
@@ -25,7 +27,8 @@ type Category = {
 const EMPTY_FORM = {
   name: "",
   price: "",
-  image: "",
+  images: [] as string[],
+  video_url: "",
   category: "",
   era: "",
   description: "",
@@ -46,11 +49,13 @@ export default function Admin() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadingIdx, setUploadingIdx] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [reordering, setReordering] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const multiFileInputRef = useRef<HTMLInputElement>(null);
 
   // Categories state
   const [categories, setCategories] = useState<Category[]>([]);
@@ -67,7 +72,6 @@ export default function Admin() {
     "X-Admin-Password": password,
   };
 
-  // Load data
   const loadProducts = async () => {
     setLoadingProducts(true);
     const res = await fetch(API_URL);
@@ -88,7 +92,7 @@ export default function Admin() {
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Admin-Password": password },
-      body: JSON.stringify({ name: "_test", price: 0, image: "", category: "", era: "", description: "" }),
+      body: JSON.stringify({ name: "_test", price: 0, images: [], video_url: "", category: "", era: "", description: "" }),
     });
     if (res.status === 403) {
       setAuthError(true);
@@ -105,34 +109,63 @@ export default function Admin() {
     }
   };
 
-  // Image upload
-  const uploadFile = async (file: File) => {
+  // Upload single image file, returns URL
+  const uploadSingleFile = async (file: File): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        const dataUrl = ev.target?.result as string;
+        const res = await fetch(UPLOAD_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Admin-Password": password },
+          body: JSON.stringify({ file: dataUrl, filename: file.name }),
+        });
+        const data = await res.json();
+        resolve(data.url || null);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Add multiple images
+  const handleAddImages = async (files: FileList | File[]) => {
+    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (!arr.length) return;
     setUploading(true);
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const res = await fetch(UPLOAD_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Admin-Password": password },
-        body: JSON.stringify({ file: dataUrl, filename: file.name }),
+    const urls: string[] = [];
+    for (const file of arr) {
+      const url = await uploadSingleFile(file);
+      if (url) urls.push(url);
+    }
+    setForm((f) => ({ ...f, images: [...f.images, ...urls] }));
+    setUploading(false);
+  };
+
+  // Replace image at index
+  const handleReplaceImage = async (idx: number, file: File) => {
+    setUploadingIdx(idx);
+    const url = await uploadSingleFile(file);
+    if (url) {
+      setForm((f) => {
+        const imgs = [...f.images];
+        imgs[idx] = url;
+        return { ...f, images: imgs };
       });
-      const data = await res.json();
-      if (data.url) setForm((f) => ({ ...f, image: data.url }));
-      setUploading(false);
-    };
-    reader.readAsDataURL(file);
+    }
+    setUploadingIdx(null);
   };
 
-  const handleFileDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith("image/")) uploadFile(file);
+  const removeImage = (idx: number) => {
+    setForm((f) => ({ ...f, images: f.images.filter((_, i) => i !== idx) }));
   };
 
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) uploadFile(file);
+  const moveImage = (from: number, to: number) => {
+    setForm((f) => {
+      const imgs = [...f.images];
+      const [item] = imgs.splice(from, 1);
+      imgs.splice(to, 0, item);
+      return { ...f, images: imgs };
+    });
   };
 
   // Product CRUD
@@ -142,7 +175,12 @@ export default function Admin() {
     await fetch(API_URL, {
       method: editingId ? "PUT" : "POST",
       headers: adminHeaders,
-      body: JSON.stringify({ ...form, price: Number(form.price), id: editingId }),
+      body: JSON.stringify({
+        ...form,
+        price: Number(form.price),
+        id: editingId,
+        image: form.images[0] || "",
+      }),
     });
     setSaving(false);
     setShowForm(false);
@@ -152,7 +190,16 @@ export default function Admin() {
   };
 
   const handleEdit = (p: Product) => {
-    setForm({ name: p.name, price: String(p.price), image: p.image, category: p.category, era: p.era, description: p.description });
+    const imgs = p.images && p.images.length > 0 ? p.images : p.image ? [p.image] : [];
+    setForm({
+      name: p.name,
+      price: String(p.price),
+      images: imgs,
+      video_url: p.video_url || "",
+      category: p.category,
+      era: p.era,
+      description: p.description,
+    });
     setEditingId(p.id);
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -175,7 +222,7 @@ export default function Admin() {
 
   const closeForm = () => { setShowForm(false); setForm(EMPTY_FORM); setEditingId(null); };
 
-  // Drag & drop sort
+  // Drag & drop product sort
   const handleSortDragStart = (id: number) => setDraggedId(id);
   const handleSortDragOver = (e: React.DragEvent, id: number) => { e.preventDefault(); if (id !== draggedId) setDragOverId(id); };
   const handleSortDrop = async (e: React.DragEvent, targetId: number) => {
@@ -345,11 +392,7 @@ export default function Admin() {
                     </div>
                     <div>
                       <label className={labelCls}>Категория</label>
-                      <select
-                        value={form.category}
-                        onChange={(e) => setForm({ ...form, category: e.target.value })}
-                        className={inputCls + " cursor-pointer"}
-                      >
+                      <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputCls + " cursor-pointer"}>
                         <option value="">— Без категории —</option>
                         {categories.map((c) => (
                           <option key={c.id} value={c.name}>{c.name}</option>
@@ -362,40 +405,90 @@ export default function Admin() {
                     </div>
                   </div>
 
-                  {/* Image upload */}
+                  {/* Multi-image upload */}
                   <div className="mb-5">
-                    <label className={labelCls}>Фотография товара</label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div
-                        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={handleFileDrop}
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`relative border-2 border-dashed flex flex-col items-center justify-center py-8 cursor-pointer transition-all duration-300 ${dragOver ? "border-gold bg-gold/5" : "border-border hover:border-gold/50 hover:bg-dark-elevated"}`}
-                      >
-                        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
-                        {uploading ? (
-                          <><Icon name="Loader2" size={24} className="animate-spin text-gold mb-2" /><p className="font-montserrat text-xs text-muted-foreground">Загрузка...</p></>
-                        ) : (
-                          <><Icon name="Upload" size={24} className="text-gold/50 mb-2" /><p className="font-montserrat text-xs text-foreground/70 text-center">Перетащите фото сюда<br/>или нажмите для выбора</p><p className="font-montserrat text-[10px] text-muted-foreground mt-1">JPG, PNG, WEBP</p></>
-                        )}
-                      </div>
-                      <div className="border border-border bg-dark-elevated flex items-center justify-center min-h-[120px] overflow-hidden">
-                        {form.image ? (
-                          <div className="relative w-full h-full min-h-[120px]">
-                            <img src={form.image} alt="Превью" className="w-full h-full object-cover" style={{ minHeight: 120 }} />
-                            <button type="button" onClick={() => setForm({ ...form, image: "" })} className="absolute top-2 right-2 w-6 h-6 bg-dark-base/80 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors">
-                              <Icon name="X" size={12} />
-                            </button>
+                    <label className={labelCls}>
+                      Фотографии товара
+                      <span className="text-muted-foreground ml-2 normal-case tracking-normal">
+                        ({form.images.length} фото · первое — главное)
+                      </span>
+                    </label>
+
+                    {/* Existing images grid */}
+                    {form.images.length > 0 && (
+                      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mb-3">
+                        {form.images.map((url, idx) => (
+                          <div key={idx} className="relative group aspect-square border border-border overflow-hidden bg-dark-elevated">
+                            {uploadingIdx === idx ? (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Icon name="Loader2" size={20} className="animate-spin text-gold" />
+                              </div>
+                            ) : (
+                              <>
+                                <img src={url} alt="" className="w-full h-full object-cover" />
+                                {idx === 0 && (
+                                  <div className="absolute top-1 left-1 bg-gold text-dark-base font-montserrat text-[8px] tracking-widest uppercase px-1.5 py-0.5">
+                                    Главное
+                                  </div>
+                                )}
+                                <div className="absolute inset-0 bg-dark-base/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                  {idx > 0 && (
+                                    <button type="button" onClick={() => moveImage(idx, idx - 1)} title="Переместить влево" className="w-6 h-6 bg-dark-surface flex items-center justify-center text-muted-foreground hover:text-gold">
+                                      <Icon name="ChevronLeft" size={12} />
+                                    </button>
+                                  )}
+                                  <label className="w-6 h-6 bg-dark-surface flex items-center justify-center text-muted-foreground hover:text-gold cursor-pointer" title="Заменить фото">
+                                    <Icon name="RefreshCw" size={12} />
+                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReplaceImage(idx, f); }} />
+                                  </label>
+                                  <button type="button" onClick={() => removeImage(idx)} title="Удалить" className="w-6 h-6 bg-dark-surface flex items-center justify-center text-muted-foreground hover:text-red-400">
+                                    <Icon name="X" size={12} />
+                                  </button>
+                                  {idx < form.images.length - 1 && (
+                                    <button type="button" onClick={() => moveImage(idx, idx + 1)} title="Переместить вправо" className="w-6 h-6 bg-dark-surface flex items-center justify-center text-muted-foreground hover:text-gold">
+                                      <Icon name="ChevronRight" size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              </>
+                            )}
                           </div>
-                        ) : (
-                          <div className="text-center"><Icon name="Image" size={28} className="text-muted-foreground/30 mx-auto mb-1" /><p className="font-montserrat text-[10px] text-muted-foreground">Предпросмотр</p></div>
-                        )}
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Drop zone */}
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={(e) => { e.preventDefault(); setDragOver(false); handleAddImages(e.dataTransfer.files); }}
+                      onClick={() => multiFileInputRef.current?.click()}
+                      className={`border-2 border-dashed flex flex-col items-center justify-center py-6 cursor-pointer transition-all duration-300 ${dragOver ? "border-gold bg-gold/5" : "border-border hover:border-gold/50 hover:bg-dark-elevated"}`}
+                    >
+                      <input ref={multiFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files) handleAddImages(e.target.files); }} />
+                      {uploading ? (
+                        <><Icon name="Loader2" size={22} className="animate-spin text-gold mb-2" /><p className="font-montserrat text-xs text-muted-foreground">Загрузка...</p></>
+                      ) : (
+                        <><Icon name="Images" size={22} className="text-gold/50 mb-2" /><p className="font-montserrat text-xs text-foreground/70 text-center">Добавить фотографии<br/><span className="text-muted-foreground text-[10px]">Можно выбрать сразу несколько</span></p></>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Video URL */}
+                  <div className="mb-5">
+                    <label className={labelCls}>Ссылка на видео</label>
+                    <div className="relative">
+                      <input
+                        value={form.video_url}
+                        onChange={(e) => setForm({ ...form, video_url: e.target.value })}
+                        className={inputCls + " pl-10"}
+                        placeholder="https://rutube.ru/video/..."
+                      />
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+                        <Icon name="Video" size={15} />
                       </div>
                     </div>
-                    <div className="mt-3">
-                      <input value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} className={inputCls} placeholder="Или вставьте ссылку на фото: https://..." />
-                    </div>
+                    <p className="font-montserrat text-[10px] text-muted-foreground mt-1.5">Поддерживаются RuTube, YouTube, Vimeo</p>
                   </div>
 
                   <div className="mb-6">
@@ -444,13 +537,25 @@ export default function Admin() {
                       <div className="text-muted-foreground/40 hover:text-gold/60 transition-colors flex-shrink-0">
                         <Icon name="GripVertical" size={18} />
                       </div>
-                      {p.image ? (
-                        <img src={p.image} alt={p.name} className="w-14 h-14 object-cover flex-shrink-0" />
-                      ) : (
-                        <div className="w-14 h-14 bg-dark-elevated flex items-center justify-center flex-shrink-0">
-                          <Icon name="Image" size={18} className="text-muted-foreground" />
-                        </div>
-                      )}
+                      <div className="relative flex-shrink-0">
+                        {p.image ? (
+                          <img src={p.image} alt={p.name} className="w-14 h-14 object-cover" />
+                        ) : (
+                          <div className="w-14 h-14 bg-dark-elevated flex items-center justify-center">
+                            <Icon name="Image" size={18} className="text-muted-foreground" />
+                          </div>
+                        )}
+                        {((p.images && p.images.length > 1) || p.video_url) && (
+                          <div className="absolute -bottom-1 -right-1 flex gap-0.5">
+                            {p.images && p.images.length > 1 && (
+                              <span className="bg-gold text-dark-base font-montserrat text-[8px] px-1 leading-4">{p.images.length}</span>
+                            )}
+                            {p.video_url && (
+                              <span className="bg-gold/70 text-dark-base font-montserrat text-[8px] px-1 leading-4">▶</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-cormorant text-lg text-foreground font-light truncate">{p.name}</p>
                         <div className="flex items-center gap-3 mt-0.5">
@@ -480,21 +585,11 @@ export default function Admin() {
         {/* ===== CATEGORIES TAB ===== */}
         {tab === "categories" && (
           <div className="max-w-xl">
-            {/* Add category form */}
             <div className="bg-dark-surface border border-gold/30 p-6 mb-6">
               <h2 className="font-cormorant text-xl text-foreground font-light mb-4">Новая категория</h2>
               <form onSubmit={handleAddCategory} className="flex gap-3">
-                <input
-                  value={catName}
-                  onChange={(e) => { setCatName(e.target.value); setCatError(""); }}
-                  className={inputCls}
-                  placeholder="Название категории"
-                />
-                <button
-                  type="submit"
-                  disabled={savingCat || !catName.trim()}
-                  className="gold-gradient text-dark-base font-montserrat text-[10px] tracking-[0.2em] uppercase px-6 py-3 hover:opacity-90 transition-all duration-300 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
-                >
+                <input value={catName} onChange={(e) => { setCatName(e.target.value); setCatError(""); }} className={inputCls} placeholder="Название категории" />
+                <button type="submit" disabled={savingCat || !catName.trim()} className="gold-gradient text-dark-base font-montserrat text-[10px] tracking-[0.2em] uppercase px-6 py-3 hover:opacity-90 transition-all duration-300 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap">
                   {savingCat ? <Icon name="Loader2" size={13} className="animate-spin" /> : <Icon name="Plus" size={13} />}
                   Добавить
                 </button>
@@ -502,7 +597,6 @@ export default function Admin() {
               {catError && <p className="font-montserrat text-xs text-red-400 mt-2">{catError}</p>}
             </div>
 
-            {/* Categories list */}
             {loadingCats ? (
               <div className="text-center py-10"><Icon name="Loader2" size={28} className="animate-spin text-gold mx-auto" /></div>
             ) : categories.length === 0 ? (
@@ -516,12 +610,7 @@ export default function Admin() {
                     <Icon name="Tag" size={15} className="text-gold/50 flex-shrink-0" />
                     {editingCat?.id === cat.id ? (
                       <form onSubmit={handleSaveCat} className="flex-1 flex gap-2">
-                        <input
-                          autoFocus
-                          value={editingCatName}
-                          onChange={(e) => { setEditingCatName(e.target.value); setCatError(""); }}
-                          className="flex-1 bg-dark-elevated border border-gold/40 px-3 py-2 font-montserrat text-sm text-foreground focus:outline-none focus:border-gold/70 transition-colors"
-                        />
+                        <input autoFocus value={editingCatName} onChange={(e) => { setEditingCatName(e.target.value); setCatError(""); }} className="flex-1 bg-dark-elevated border border-gold/40 px-3 py-2 font-montserrat text-sm text-foreground focus:outline-none focus:border-gold/70 transition-colors" />
                         <button type="submit" disabled={savingCat || !editingCatName.trim()} className="gold-gradient text-dark-base font-montserrat text-[10px] tracking-widest uppercase px-4 py-2 hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-1">
                           {savingCat ? <Icon name="Loader2" size={12} className="animate-spin" /> : <Icon name="Check" size={12} />}
                           Сохранить
@@ -533,17 +622,10 @@ export default function Admin() {
                     ) : (
                       <>
                         <span className="flex-1 font-montserrat text-sm text-foreground">{cat.name}</span>
-                        <button
-                          onClick={() => { setEditingCat(cat); setEditingCatName(cat.name); setCatError(""); }}
-                          className="w-8 h-8 border border-border flex items-center justify-center text-muted-foreground hover:text-gold hover:border-gold/40 transition-all duration-200"
-                        >
+                        <button onClick={() => { setEditingCat(cat); setEditingCatName(cat.name); setCatError(""); }} className="w-8 h-8 border border-border flex items-center justify-center text-muted-foreground hover:text-gold hover:border-gold/40 transition-all duration-200">
                           <Icon name="Pencil" size={13} />
                         </button>
-                        <button
-                          onClick={() => handleDeleteCat(cat.id)}
-                          disabled={deletingCatId === cat.id}
-                          className="w-8 h-8 border border-border flex items-center justify-center text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all duration-200 disabled:opacity-40"
-                        >
+                        <button onClick={() => handleDeleteCat(cat.id)} disabled={deletingCatId === cat.id} className="w-8 h-8 border border-border flex items-center justify-center text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all duration-200 disabled:opacity-40">
                           {deletingCatId === cat.id ? <Icon name="Loader2" size={13} className="animate-spin" /> : <Icon name="Trash2" size={13} />}
                         </button>
                       </>
@@ -555,7 +637,6 @@ export default function Admin() {
             )}
           </div>
         )}
-
       </div>
     </div>
   );

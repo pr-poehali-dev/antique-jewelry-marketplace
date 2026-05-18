@@ -51,13 +51,15 @@ def handler(event: dict, context) -> dict:
 
     # POST — создать товар
     if method == 'POST':
+        images = body.get('images', [])
+        main_image = images[0] if images else body.get('image', '')
         conn = get_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM products')
         next_order = cur.fetchone()['coalesce']
         cur.execute(
-            'INSERT INTO products (name, price, image, category, era, description, sort_order) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *',
-            (body['name'], body['price'], body.get('image', ''), body.get('category', ''), body.get('era', ''), body.get('description', ''), next_order)
+            'INSERT INTO products (name, price, image, category, era, description, sort_order, images, video_url) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *',
+            (body['name'], body['price'], main_image, body.get('category', ''), body.get('era', ''), body.get('description', ''), next_order, images, body.get('video_url', ''))
         )
         product = dict(cur.fetchone())
         conn.commit()
@@ -68,11 +70,13 @@ def handler(event: dict, context) -> dict:
     # PUT — обновить товар
     if method == 'PUT':
         product_id = body.get('id')
+        images = body.get('images', [])
+        main_image = images[0] if images else body.get('image', '')
         conn = get_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(
-            'UPDATE products SET name=%s, price=%s, image=%s, category=%s, era=%s, description=%s WHERE id=%s RETURNING *',
-            (body['name'], body['price'], body.get('image', ''), body.get('category', ''), body.get('era', ''), body.get('description', ''), product_id)
+            'UPDATE products SET name=%s, price=%s, image=%s, category=%s, era=%s, description=%s, images=%s, video_url=%s WHERE id=%s RETURNING *',
+            (body['name'], body['price'], main_image, body.get('category', ''), body.get('era', ''), body.get('description', ''), images, body.get('video_url', ''), product_id)
         )
         product = cur.fetchone()
         conn.commit()
