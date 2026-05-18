@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import type { CartItem } from "@/pages/Index";
+import ProductModal from "@/components/ProductModal";
 
 const API_URL = "https://functions.poehali.dev/a7d65e38-ef61-4f2a-93fc-0ae9439533a8";
 
@@ -19,6 +20,7 @@ const CatalogSection = ({ addToCart }: CatalogProps) => {
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState("Все");
   const [addedId, setAddedId] = useState<number | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     fetch(API_URL)
@@ -34,7 +36,8 @@ const CatalogSection = ({ addToCart }: CatalogProps) => {
       ? products
       : products.filter((p) => p.category === activeCategory);
 
-  const handleAdd = (product: Product) => {
+  const handleAdd = (product: Product, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     addToCart({ id: product.id, name: product.name, price: product.price, image: product.image });
     setAddedId(product.id);
     setTimeout(() => setAddedId(null), 1500);
@@ -86,7 +89,11 @@ const CatalogSection = ({ addToCart }: CatalogProps) => {
         {!loading && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filtered.map((product) => (
-              <div key={product.id} className="luxury-card group cursor-pointer">
+              <div
+                key={product.id}
+                className="luxury-card group cursor-pointer"
+                onClick={() => setSelectedProduct(product)}
+              >
                 {/* Image */}
                 <div className="relative overflow-hidden aspect-[4/3]">
                   <img
@@ -95,6 +102,15 @@ const CatalogSection = ({ addToCart }: CatalogProps) => {
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-dark-base/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                  {/* Hover overlay hint */}
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <span className="bg-dark-base/70 backdrop-blur-sm border border-gold/30 text-gold font-montserrat text-[9px] tracking-[0.3em] uppercase px-4 py-2 flex items-center gap-2">
+                      <Icon name="Eye" size={11} />
+                      Подробнее
+                    </span>
+                  </div>
+
                   {product.era && (
                     <div className="absolute top-4 left-4">
                       <span className="font-montserrat text-[9px] tracking-[0.3em] uppercase bg-gold/90 text-dark-base px-2 py-1">
@@ -112,7 +128,7 @@ const CatalogSection = ({ addToCart }: CatalogProps) => {
                   <h3 className="font-cormorant text-xl font-light text-foreground mb-2 leading-tight">
                     {product.name}
                   </h3>
-                  <p className="font-montserrat text-xs text-muted-foreground leading-relaxed mb-4">
+                  <p className="font-montserrat text-xs text-muted-foreground leading-relaxed mb-4 line-clamp-2">
                     {product.description}
                   </p>
 
@@ -121,7 +137,7 @@ const CatalogSection = ({ addToCart }: CatalogProps) => {
                       {formatPrice(product.price)}
                     </span>
                     <button
-                      onClick={() => handleAdd(product)}
+                      onClick={(e) => handleAdd(product, e)}
                       className={`flex items-center gap-2 font-montserrat text-[10px] tracking-[0.2em] uppercase px-4 py-2 transition-all duration-300 ${
                         addedId === product.id
                           ? "bg-gold text-dark-base"
@@ -144,6 +160,13 @@ const CatalogSection = ({ addToCart }: CatalogProps) => {
           </div>
         )}
       </div>
+
+      {/* Product modal */}
+      <ProductModal
+        product={selectedProduct}
+        onClose={() => setSelectedProduct(null)}
+        onAddToCart={addToCart}
+      />
     </section>
   );
 };
