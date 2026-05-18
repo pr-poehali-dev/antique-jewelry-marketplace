@@ -1,4 +1,5 @@
 {
+  "categories-api": "https://functions.poehali.dev/6914ab4d-b145-479e-94c6-f5c0274394f0",
   "upload-image": "https://functions.poehali.dev/8587e403-cee0-4f85-a5d9-8fa844217ec2",
   "products-api": "https://functions.poehali.dev/a7d65e38-ef61-4f2a-93fc-0ae9439533a8",
   "send-order": "https://functions.poehali.dev/d175d116-7b1e-4ebe-904c-2ab0fc2b9b9a"
