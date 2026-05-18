@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useRef } from "react";
 import Icon from "@/components/ui/icon";
 
 const API_URL = "https://functions.poehali.dev/a7d65e38-ef61-4f2a-93fc-0ae9439533a8";
+const UPLOAD_URL = "https://functions.poehali.dev/8587e403-cee0-4f85-a5d9-8fa844217ec2";
 
 type Product = {
   id: number;
@@ -33,6 +34,9 @@ export default function Admin() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const adminHeaders = {
     "Content-Type": "application/json",
@@ -60,7 +64,6 @@ export default function Admin() {
       setAuthed(true);
       setAuthError(false);
       loadProducts();
-      // Удаляем тестовый товар если создался
       if (res.status === 201) {
         const created = await res.json();
         await fetch(API_URL, {
@@ -71,6 +74,35 @@ export default function Admin() {
         loadProducts();
       }
     }
+  };
+
+  const uploadFile = async (file: File) => {
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const res = await fetch(UPLOAD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Password": password },
+        body: JSON.stringify({ file: dataUrl, filename: file.name }),
+      });
+      const data = await res.json();
+      if (data.url) setForm((f) => ({ ...f, image: data.url }));
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFileDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) uploadFile(file);
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) uploadFile(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,6 +146,8 @@ export default function Admin() {
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const closeForm = () => { setShowForm(false); setForm(EMPTY_FORM); setEditingId(null); };
 
   const inputCls = "w-full bg-dark-elevated border border-border px-4 py-3 font-montserrat text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-gold/60 transition-colors";
   const labelCls = "font-montserrat text-[9px] tracking-[0.3em] uppercase text-gold/60 block mb-2";
@@ -179,7 +213,7 @@ export default function Admin() {
               <h2 className="font-cormorant text-2xl text-foreground font-light">
                 {editingId ? "Редактировать товар" : "Новый товар"}
               </h2>
-              <button onClick={() => { setShowForm(false); setForm(EMPTY_FORM); setEditingId(null); }} className="text-muted-foreground hover:text-gold transition-colors">
+              <button onClick={closeForm} className="text-muted-foreground hover:text-gold transition-colors">
                 <Icon name="X" size={18} />
               </button>
             </div>
@@ -202,19 +236,78 @@ export default function Admin() {
                   <input value={form.era} onChange={(e) => setForm({ ...form, era: e.target.value })} className={inputCls} placeholder="XVIII век, XIX век..." />
                 </div>
               </div>
+
+              {/* Image upload */}
               <div className="mb-5">
-                <label className={labelCls}>Ссылка на фото</label>
-                <input value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} className={inputCls} placeholder="https://..." />
+                <label className={labelCls}>Фотография товара</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Drop zone */}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleFileDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`relative border-2 border-dashed flex flex-col items-center justify-center py-8 cursor-pointer transition-all duration-300 ${
+                      dragOver ? "border-gold bg-gold/5" : "border-border hover:border-gold/50 hover:bg-dark-elevated"
+                    }`}
+                  >
+                    <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+                    {uploading ? (
+                      <>
+                        <Icon name="Loader2" size={24} className="animate-spin text-gold mb-2" />
+                        <p className="font-montserrat text-xs text-muted-foreground">Загрузка...</p>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="Upload" size={24} className="text-gold/50 mb-2" />
+                        <p className="font-montserrat text-xs text-foreground/70 text-center">Перетащите фото сюда<br/>или нажмите для выбора</p>
+                        <p className="font-montserrat text-[10px] text-muted-foreground mt-1">JPG, PNG, WEBP</p>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Preview */}
+                  <div className="border border-border bg-dark-elevated flex items-center justify-center min-h-[120px] overflow-hidden">
+                    {form.image ? (
+                      <div className="relative w-full h-full min-h-[120px]">
+                        <img src={form.image} alt="Превью" className="w-full h-full object-cover" style={{ minHeight: 120 }} />
+                        <button
+                          type="button"
+                          onClick={() => setForm({ ...form, image: "" })}
+                          className="absolute top-2 right-2 w-6 h-6 bg-dark-base/80 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors"
+                        >
+                          <Icon name="X" size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-center">
+                        <Icon name="Image" size={28} className="text-muted-foreground/30 mx-auto mb-1" />
+                        <p className="font-montserrat text-[10px] text-muted-foreground">Предпросмотр</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* URL fallback */}
+                <div className="mt-3">
+                  <input
+                    value={form.image}
+                    onChange={(e) => setForm({ ...form, image: e.target.value })}
+                    className={inputCls}
+                    placeholder="Или вставьте ссылку на фото: https://..."
+                  />
+                </div>
               </div>
+
               <div className="mb-6">
                 <label className={labelCls}>Описание</label>
                 <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${inputCls} resize-none`} placeholder="Краткое описание предмета..." />
               </div>
               <div className="flex gap-3">
-                <button type="submit" disabled={saving} className="gold-gradient text-dark-base font-montserrat text-xs tracking-[0.2em] uppercase px-8 py-3 hover:opacity-90 transition-all duration-300 disabled:opacity-60 flex items-center gap-2">
+                <button type="submit" disabled={saving || uploading} className="gold-gradient text-dark-base font-montserrat text-xs tracking-[0.2em] uppercase px-8 py-3 hover:opacity-90 transition-all duration-300 disabled:opacity-60 flex items-center gap-2">
                   {saving ? <><Icon name="Loader2" size={13} className="animate-spin" />Сохранение...</> : "Сохранить"}
                 </button>
-                <button type="button" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); setEditingId(null); }} className="border border-border text-muted-foreground font-montserrat text-xs tracking-[0.2em] uppercase px-8 py-3 hover:border-gold/40 hover:text-gold transition-all duration-300">
+                <button type="button" onClick={closeForm} className="border border-border text-muted-foreground font-montserrat text-xs tracking-[0.2em] uppercase px-8 py-3 hover:border-gold/40 hover:text-gold transition-all duration-300">
                   Отмена
                 </button>
               </div>
