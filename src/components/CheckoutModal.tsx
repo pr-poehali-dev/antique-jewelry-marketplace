@@ -9,8 +9,11 @@ type CheckoutModalProps = {
   onSuccess: () => void;
 };
 
+const SEND_ORDER_URL = "https://functions.poehali.dev/d175d116-7b1e-4ebe-904c-2ab0fc2b9b9a";
+
 const CheckoutModal = ({ open, onClose, items, onSuccess }: CheckoutModalProps) => {
-  const [step, setStep] = useState<"form" | "success">("form");
+  const [step, setStep] = useState<"form" | "success" | "error">("form");
+  const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -23,13 +26,34 @@ const CheckoutModal = ({ open, onClose, items, onSuccess }: CheckoutModalProps) 
   const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const formatPrice = (price: number) => price.toLocaleString("ru-RU") + " ₽";
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStep("success");
-    setTimeout(() => {
-      onSuccess();
-      setStep("form");
-    }, 3000);
+    setLoading(true);
+    try {
+      const res = await fetch(SEND_ORDER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          items: items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })),
+          total,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStep("success");
+        setTimeout(() => {
+          onSuccess();
+          setStep("form");
+        }, 3000);
+      } else {
+        setStep("error");
+      }
+    } catch {
+      setStep("error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!open) return null;
@@ -42,7 +66,25 @@ const CheckoutModal = ({ open, onClose, items, onSuccess }: CheckoutModalProps) 
       />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-dark-surface border border-border w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-fade-in">
-          {step === "success" ? (
+          {step === "error" ? (
+            <div className="p-12 text-center">
+              <div className="w-20 h-20 border border-red-500/40 flex items-center justify-center mx-auto mb-6">
+                <Icon name="AlertCircle" size={32} className="text-red-400" />
+              </div>
+              <h3 className="font-cormorant text-3xl text-foreground font-light mb-3">
+                Ошибка отправки
+              </h3>
+              <p className="font-montserrat text-sm text-muted-foreground mb-6">
+                Не удалось отправить заказ. Пожалуйста, позвоните нам напрямую.
+              </p>
+              <button
+                onClick={() => setStep("form")}
+                className="font-montserrat text-xs tracking-widest uppercase border border-gold/50 px-6 py-3 text-gold hover:bg-gold/10 transition-all duration-300"
+              >
+                Попробовать снова
+              </button>
+            </div>
+          ) : step === "success" ? (
             <div className="p-12 text-center">
               <div className="w-20 h-20 border border-gold/40 flex items-center justify-center mx-auto mb-6">
                 <Icon name="Check" size={32} className="text-gold" />
@@ -196,9 +238,17 @@ const CheckoutModal = ({ open, onClose, items, onSuccess }: CheckoutModalProps) 
 
                 <button
                   type="submit"
-                  className="w-full gold-gradient text-dark-base font-montserrat text-xs tracking-[0.3em] uppercase py-4 hover:opacity-90 transition-all duration-300"
+                  disabled={loading}
+                  className="w-full gold-gradient text-dark-base font-montserrat text-xs tracking-[0.3em] uppercase py-4 hover:opacity-90 transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  Подтвердить заказ
+                  {loading ? (
+                    <>
+                      <Icon name="Loader2" size={14} className="animate-spin" />
+                      Отправка...
+                    </>
+                  ) : (
+                    "Подтвердить заказ"
+                  )}
                 </button>
                 <p className="font-montserrat text-[10px] text-muted-foreground text-center mt-3">
                   Нажимая кнопку, вы соглашаетесь с условиями продажи
