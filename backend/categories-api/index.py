@@ -54,8 +54,8 @@ def handler(event: dict, context) -> dict:
             return json_response({'error': 'Название обязательно'}, 400)
         conn = get_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories')
-        next_order = cur.fetchone()['coalesce']
+        cur.execute('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM categories')
+        next_order = cur.fetchone()['next_order']
         try:
             cur.execute(
                 'INSERT INTO categories (name, sort_order) VALUES (%s, %s) RETURNING *',
